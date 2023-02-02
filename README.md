@@ -5,3 +5,7 @@
 
 
     python -m pytest --disable-pytest-warnings
+
+
+
+    docker run  -e PULUMI_ACCESS_TOKEN=<token> dirien/minecraft-automationapi destroy my-minecraft-sever -s ediri/dev

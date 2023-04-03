@@ -1,4 +1,4 @@
-name: newton-python-training
+name: pulumi-python-minecraft
 runtime:
   name: python
   options:

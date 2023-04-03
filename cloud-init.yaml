@@ -37,7 +37,7 @@ runcmd:
   - sleep 1m
   - echo "eula=true" > /minecraft/eula.txt
   - sed -ir "s/^[#]*\s*max-players=.*/max-players=100/" /minecraft/server.properties
-  - sed -ir "s/^[#]*\s*motd=.*/motd=Pulumi Advanced Training/" /minecraft/server.properties
+  - sed -ir "s/^[#]*\s*motd=.*/motd=Pulumi Advanced Training 1/" /minecraft/server.properties
   - sed -ir "s/^[#]*\s*difficulty=.*/difficulty=normal:q/" /minecraft/server.properties
   - sed -ir "s/^[#]*\s*level-seed=.*/level-seed=pulumirocks/" /minecraft/server.properties
   - systemctl restart minecraft.service

@@ -1,2 +1,4 @@
+environment:
+- aws-oidc
 config:
   aws:region: eu-central-1

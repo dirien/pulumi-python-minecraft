@@ -266,7 +266,7 @@ func main() {
 
 			repo := auto.GitRepo{
 				URL:         "https://github.com/pulumi-demos/pulumi-python-minecraft.git",
-				Branch:      "refs/heads/master",
+				Branch:      "refs/heads/main",
 				ProjectPath: "",
 			}
 

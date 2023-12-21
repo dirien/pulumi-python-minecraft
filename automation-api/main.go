@@ -1,21 +1,18 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
+	"log"
+	"os"
+
 	"github.com/pulumi/pulumi-aws/sdk/v5/go/aws/ec2"
 	"github.com/pulumi/pulumi/sdk/v3/go/auto"
 	"github.com/pulumi/pulumi/sdk/v3/go/auto/optdestroy"
+	"github.com/pulumi/pulumi/sdk/v3/go/auto/optremoteup"
 	"github.com/pulumi/pulumi/sdk/v3/go/auto/optup"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 	"github.com/spf13/cobra"
-	"io"
-	"log"
-	"net/http"
-	"os"
-	"time"
 )
 
 var (
@@ -185,35 +182,6 @@ func createOrSelectMinecraftStack(ctx context.Context, stackName string, project
 	InfoLogger.Println("Refresh succeeded!")
 	return s, nil
 }
-func getDeploymentStatus(organization, project, stack, deploymentID, accessToken, nextToken string) (string, error) {
-	baseURL := "https://api.pulumi.com/api/preview"
-	url := fmt.Sprintf("%s/%s/%s/%s/deployments/%s", baseURL, organization, project, stack, deploymentID)
-
-	req, err := http.NewRequest(http.MethodGet, url, nil)
-	if err != nil {
-		return "", fmt.Errorf("error creating request: %v", err)
-	}
-
-	req.Header.Set("Authorization", fmt.Sprintf("token %s", accessToken))
-
-	client := &http.Client{
-		Timeout: 5 * time.Second,
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("error making request: %v", err)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("error reading response body: %v", err)
-	}
-	return string(body), nil
-}
-
-type DeploymentStatus struct {
-	Status string `json:"status"`
-}
 
 func main() {
 	var stackName string
@@ -287,35 +255,47 @@ func main() {
 		Use:   "remote",
 		Short: "Deploy a minecraft server using Pulumi Deployment",
 		Run: func(cmd *cobra.Command, args []string) {
+			ctx := context.Background()
+
 			pulumiAccessToken := os.Getenv("PULUMI_ACCESS_TOKEN")
-			org := "dirien"
+			org := "demo"
 			project := "pulumi-python-minecraft"
 			stack := "dev"
 
-			id, err := startDeployment(org, project, stack, pulumiAccessToken)
-			if err {
-				ErrorLogger.Fatalf("Failed to start deployment")
-			}
-			nextToken := ""
-			for {
-				status, err := getDeploymentStatus(org, project, stack, id, pulumiAccessToken, nextToken)
-				if err != nil {
-					ErrorLogger.Fatalf("Failed to get status: %v", err)
-				}
+			stackName := auto.FullyQualifiedStackName(org, project, stack)
 
-				var deploymentStatus DeploymentStatus
-				err = json.Unmarshal([]byte(status), &deploymentStatus)
-				if err != nil {
-					ErrorLogger.Fatalf("Failed to unmarshall status: %v", err)
-				}
-
-				newStatus := deploymentStatus.Status
-				if newStatus == "succeeded" {
-					InfoLogger.Println("No more status available.")
-					break
-				}
-				nextToken = newStatus
+			repo := auto.GitRepo{
+				URL:         "https://github.com/pulumi-demos/pulumi-python-minecraft.git",
+				Branch:      "refs/heads/main",
+				ProjectPath: "",
 			}
+
+			env := map[string]auto.EnvVarValue{
+				"PULUMI_ACCESS_TOKEN":   {Value: pulumiAccessToken},
+				"AWS_ACCESS_KEY_ID":     {Value: os.Getenv("AWS_ACCESS_KEY_ID")},
+				"AWS_SECRET_ACCESS_KEY": {Value: os.Getenv("AWS_SECRET_ACCESS_KEY"), Secret: true},
+				"AWS_SESSION_TOKEN":     {Value: os.Getenv("AWS_SESSION_TOKEN"), Secret: true},
+			}
+
+			// Create or select an existing stack matching the given name.
+			s, err := auto.UpsertRemoteStackGitSource(ctx, stackName, repo, auto.RemoteEnvVars(env))
+			if err != nil {
+				fmt.Printf("Failed to create or select stack: %v\n", err)
+				os.Exit(1)
+			}
+
+			// Wire up our update to stream progress to stdout.
+			stdoutStreamer := optremoteup.ProgressStreams(os.Stdout)
+
+			// Run the update to deploy our s3 website.
+			_, err = s.Up(ctx, stdoutStreamer)
+			if err != nil {
+				fmt.Printf("Failed to update stack: %v\n\n", err)
+				os.Exit(1)
+			}
+
+			fmt.Println("Update succeeded!")
+
 			InfoLogger.Println("Deployment succeeded!")
 		},
 	}
@@ -325,51 +305,4 @@ func main() {
 	rootCmd.AddCommand(destroyCommand)
 	rootCmd.AddCommand(remoteCmd)
 	rootCmd.Execute()
-}
-
-func startDeployment(organization, project, stack, accessToken string) (string, bool) {
-	url := fmt.Sprintf("https://api.pulumi.com/api/preview/%s/%s/%s/deployments", organization, project, stack)
-
-	data := map[string]interface{}{
-		"operation":       "update",
-		"inheritSettings": true,
-	}
-
-	jsonData, err := json.Marshal(data)
-	if err != nil {
-		ErrorLogger.Fatalf("Failed to marshal data: %v", err)
-	}
-
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(jsonData))
-	if err != nil {
-		ErrorLogger.Fatalf("Failed to create request: %v", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", fmt.Sprintf("token %s", accessToken))
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		ErrorLogger.Fatalf("Failed to send request: %v", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		ErrorLogger.Fatalf("Failed to read response: %v", err)
-	}
-
-	var jsonResponse map[string]interface{}
-	err = json.Unmarshal([]byte(string(body)), &jsonResponse)
-	if err != nil {
-		fmt.Println("Error unmarshalling JSON:", err)
-		return "", true
-	}
-
-	id, ok := jsonResponse["id"].(string)
-	if !ok {
-		ErrorLogger.Fatalf("Failed to unmarshall ID")
-	}
-	return id, false
 }
